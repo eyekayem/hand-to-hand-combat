@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
 import GestureStudio from "./pages/GestureStudio";
 import NotFound from "./pages/NotFound";
+import { CanonicalUrl } from "./components/CanonicalUrl";
 
 const queryClient = new QueryClient();
 
@@ -15,6 +16,7 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+        <CanonicalUrl />
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/studio" element={<GestureStudio />} />
