@@ -1,160 +1,97 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { HandArena } from '@/components/HandArena';
-import { TrackedHand } from '@/lib/handTracking';
-import { extractFeatures, HandFeatures, resetFeatureHistory } from '@/lib/features';
-import { pickPrimaryHand } from '@/lib/hand/handGeometry';
-import { updateBehavior, getState, GestureCommand, BehaviorState, resetBehavior } from '@/lib/behaviorEngine';
+import { useState, useCallback } from 'react';
+import { HandArena, type ArenaSnapshot } from '@/components/HandArena';
 import { NavLink } from '@/components/NavLink';
+import { DEFAULT_GRAPH, MOODS, MOOD_RGB } from '@/lib/graph/gestureGraph';
+import type { FingerState } from '@/lib/hand/handGeometry';
+
+const FINGERS: (keyof FingerState)[] = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+const DEPTH = new Map(DEFAULT_GRAPH.map(n => [n.id, n.parents?.length ? 1 : 0]));
+
+function Bar({ value, color = 'hsl(var(--primary))', dim = false }: { value: number; color?: string; dim?: boolean }) {
+  return (
+    <div className="h-1.5 flex-1 rounded bg-muted overflow-hidden">
+      <div className="h-full rounded" style={{ width: `${Math.round(Math.min(1, Math.max(0, value)) * 100)}%`, background: color, opacity: dim ? 0.45 : 1 }} />
+    </div>
+  );
+}
 
 const Index = () => {
   const [cameraActive, setCameraActive] = useState(false);
-  const [fps, setFps] = useState(0);
+  const [snap, setSnap] = useState<ArenaSnapshot | null>(null);
+  const onSnapshot = useCallback((s: ArenaSnapshot) => setSnap(s), []);
 
-
-  const [currentFeatures, setCurrentFeatures] = useState<HandFeatures | null>(null);
-  const [gesture, setGesture] = useState<GestureCommand | null>(null);
-  const [behaviorState, setBehaviorState] = useState<BehaviorState>(getState());
-
-  useEffect(() => {
-    if (!cameraActive) {
-      resetFeatureHistory();
-      resetBehavior();
-      setCurrentFeatures(null);
-      setBehaviorState(getState());
-    }
-  }, [cameraActive]);
-
-  const handleHandUpdate = useCallback((hands: TrackedHand[], trackingFps: number) => {
-    setFps(trackingFps);
-    const timestamp = performance.now();
-
-    const primary = pickPrimaryHand(hands);
-    const features: HandFeatures | null = primary ? extractFeatures(primary, timestamp) : null;
-    setCurrentFeatures(features);
-
-    const newGesture = updateBehavior(features, timestamp);
-    setGesture(newGesture);
-    setBehaviorState(getState());
-  }, []);
+  const live = cameraActive && snap;
+  const committedLabel = live && snap.committed ? DEFAULT_GRAPH.find(n => n.id === snap.committed)?.label : null;
+  const moodTop = live ? MOODS.reduce((a, b) => (snap.app.mood[a] >= snap.app.mood[b] ? a : b)) : 'neutral';
 
   return (
     <div className="h-screen w-screen bg-background overflow-hidden flex flex-col">
-      {/* Header */}
       <header className="flex-shrink-0 px-6 py-3 border-b border-border/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-semibold glow-text">Handspite Lab</h1>
-            <span className="text-xs px-2 py-0.5 rounded bg-secondary text-secondary-foreground">
-              Call & Response
-            </span>
+            <span className="text-xs px-2 py-0.5 rounded bg-secondary text-secondary-foreground">Call & Response</span>
           </div>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <NavLink to="/studio" className="hover:text-foreground text-primary font-medium">
-              Gesture Studio →
-            </NavLink>
-            <span>{fps} FPS</span>
-            {behaviorState.isResponding && (
-              <span className="text-primary animate-pulse">● RESPONDING</span>
-            )}
+            <NavLink to="/studio" className="hover:text-foreground text-primary font-medium">Gesture Studio →</NavLink>
+            <span className="font-mono w-14 text-right">{live ? snap.fps : 0} FPS</span>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-1 flex min-h-0 p-4 gap-4">
-        {/* Arena */}
         <div className="flex-1 min-w-0 glass-panel p-4">
-          <HandArena
-            onHandUpdate={handleHandUpdate}
-            gesture={gesture}
-            isActive={cameraActive}
-            onActiveChange={setCameraActive}
-            detectedGesture={currentFeatures?.detectedGesture || 'NONE'}
-          />
+          <HandArena isActive={cameraActive} onActiveChange={setCameraActive} onSnapshot={onSnapshot} />
         </div>
 
-        {/* Debug Panel */}
-        <div className="w-64 flex-shrink-0 glass-panel p-4 overflow-y-auto">
-          <h3 className="text-sm font-medium text-muted-foreground mb-4">Debug</h3>
-
-          <div className="space-y-4 text-xs">
-            <div>
-              <div className="text-muted-foreground mb-2">Your Gesture</div>
-              <div className="font-mono text-lg text-primary">
-                {currentFeatures?.detectedGesture || 'NONE'}
-              </div>
-              {currentFeatures?.isStable && (
-                <div className="text-primary mt-1">● Holding steady...</div>
-              )}
+        <div className="w-64 flex-shrink-0 glass-panel p-4 overflow-y-auto text-xs space-y-5">
+          <section>
+            <div className="text-muted-foreground mb-1">Reading</div>
+            <div className="font-mono text-lg text-primary">{committedLabel ?? (live && snap.geometry ? '…' : 'NONE')}</div>
+            <div className="font-mono text-[10px] mt-1" style={{ color: `rgb(${MOOD_RGB[moodTop].join(',')})` }}>
+              mood: {moodTop}
             </div>
+          </section>
 
-            <div className="border-t border-border pt-4">
-              <div className="text-muted-foreground mb-2">App Response</div>
-              <div className="font-mono text-lg" style={{ color: gesture?.isResponding ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))' }}>
-                {gesture?.isResponding ? gesture.gesture : 'WAITING'}
-              </div>
+          <section className="border-t border-border pt-4">
+            <div className="text-muted-foreground mb-2">Gesture graph</div>
+            <div className="space-y-1.5 font-mono text-[10px]">
+              {DEFAULT_GRAPH.map(n => {
+                const s = live ? snap.resolution?.nodes.find(x => x.id === n.id) : undefined;
+                const rgb = MOOD_RGB[n.response.mood].join(',');
+                return (
+                  <div key={n.id} className="flex items-center gap-2" style={{ paddingLeft: (DEPTH.get(n.id) ?? 0) * 10 }}>
+                    <span className="w-20 truncate">{n.label}</span>
+                    <div className="flex-1 flex flex-col gap-0.5">
+                      <Bar value={s?.score ?? 0} color={`rgb(${rgb})`} dim />
+                      <Bar value={s?.weight ?? 0} color={`rgb(${rgb})`} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+            <div className="text-[10px] text-muted-foreground mt-2">Top bar: match. Bottom: share of the response.</div>
+          </section>
 
-            <div className="border-t border-border pt-4">
-              <div className="text-muted-foreground mb-2">Finger Extensions</div>
-              {currentFeatures && (
-                <div className="space-y-1 font-mono text-[10px]">
-                  <div className="flex justify-between">
-                    <span>Thumb:</span>
-                    <span>{(currentFeatures.thumbExtension * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Index:</span>
-                    <span>{(currentFeatures.indexExtension * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Middle:</span>
-                    <span>{(currentFeatures.middleExtension * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Ring:</span>
-                    <span>{(currentFeatures.ringExtension * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Pinky:</span>
-                    <span>{(currentFeatures.pinkyExtension * 100).toFixed(0)}%</span>
+          <section className="border-t border-border pt-4">
+            <div className="text-muted-foreground mb-2">Your fingers / app fingers</div>
+            <div className="space-y-1.5 font-mono text-[10px]">
+              {FINGERS.map(k => (
+                <div key={k} className="flex items-center gap-2">
+                  <span className="w-12 capitalize">{k}</span>
+                  <div className="flex-1 flex flex-col gap-0.5">
+                    <Bar value={live && snap.geometry ? snap.geometry.fingers[k] : 0} />
+                    <Bar value={live ? snap.app.fingers[k] : 0} color={`rgb(${MOOD_RGB[moodTop].join(',')})`} />
                   </div>
                 </div>
-              )}
+              ))}
             </div>
-
-            <div className="border-t border-border pt-4">
-              <div className="text-muted-foreground mb-2">Gesture Checks</div>
-              {currentFeatures && (
-                <div className="space-y-1 font-mono text-[10px]">
-                  <div className={currentFeatures.isFist ? 'text-primary' : 'text-muted-foreground'}>
-                    {currentFeatures.isFist ? '✓' : '○'} Fist
-                  </div>
-                  <div className={currentFeatures.isOpenHand ? 'text-primary' : 'text-muted-foreground'}>
-                    {currentFeatures.isOpenHand ? '✓' : '○'} Open Hand
-                  </div>
-                  <div className={currentFeatures.isThumbsUp ? 'text-primary' : 'text-muted-foreground'}>
-                    {currentFeatures.isThumbsUp ? '✓' : '○'} Thumbs Up
-                  </div>
-                  <div className={currentFeatures.isPeaceSign ? 'text-primary' : 'text-muted-foreground'}>
-                    {currentFeatures.isPeaceSign ? '✓' : '○'} Peace
-                  </div>
-                  <div className={currentFeatures.isPoint ? 'text-primary' : 'text-muted-foreground'}>
-                    {currentFeatures.isPoint ? '✓' : '○'} Point
-                  </div>
-                  <div className={currentFeatures.isWaving ? 'text-primary' : 'text-muted-foreground'}>
-                    {currentFeatures.isWaving ? '✓' : '○'} Waving
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          </section>
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="flex-shrink-0 px-6 py-2 border-t border-border/50 text-xs text-muted-foreground text-center">
-        Make a gesture and hold still → App responds! | 👍→👍 | 👋→👋 | ✌️→✌️ | ✊→🖕
+        Change your hand and watch it answer | 👍→👍 | 👋→👋 | ✌️→✌️ | ✊→🖕
       </footer>
     </div>
   );
