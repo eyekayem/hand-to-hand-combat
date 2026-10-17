@@ -9,7 +9,12 @@ export interface OneEuroParams {
   dCutoff: number;   // Hz, cutoff for the derivative.
 }
 
-export const DEFAULT_ONE_EURO: OneEuroParams = { minCutoff: 1.2, beta: 0.02, dCutoff: 1.0 };
+// beta scales with the units of the signal (speed in units/second), so image
+// coords (0..1 of frame) and world coords (metres) need their own values.
+// Both give ~16 ms lag on a moving hand while keeping rest jitter at ~15%.
+export const IMAGE_ONE_EURO: OneEuroParams = { minCutoff: 1.5, beta: 4, dCutoff: 1.0 };
+export const WORLD_ONE_EURO: OneEuroParams = { minCutoff: 1.5, beta: 12, dCutoff: 1.0 };
+export const DEFAULT_ONE_EURO = IMAGE_ONE_EURO;
 
 const alpha = (cutoff: number, dt: number) => {
   const tau = 1 / (2 * Math.PI * cutoff);

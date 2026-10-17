@@ -6,7 +6,7 @@
 // Per-frame state lives in refs. React only hears about it through a
 // throttled snapshot for the debug panel.
 import { useRef, useEffect, useCallback, useState } from 'react';
-import { initializeHandTracking, detectHands, TrackedHand, TrackingResult, HandLandmark } from '@/lib/handTracking';
+import { initializeHandTracking, detectHands, setMaxHands, TrackedHand, TrackingResult, HandLandmark } from '@/lib/handTracking';
 import { computeGeometry, pickPrimaryHand, L, type HandGeometry } from '@/lib/hand/handGeometry';
 import { handLandmarks, rotate } from '@/lib/hand/handModel';
 import {
@@ -91,6 +91,8 @@ export function HandArena({ isActive, onActiveChange, onSnapshot }: HandArenaPro
 
   // Warm the tracker as soon as the arena mounts, so Start only waits on the camera.
   useEffect(() => {
+    // One hand: with 2 allowed and one in view, MediaPipe re-runs palm detection every frame.
+    setMaxHands(1).catch(() => {});
     initializeHandTracking().catch(() => {
       /* surfaced on Start */
     });
@@ -215,7 +217,7 @@ export function HandArena({ isActive, onActiveChange, onSnapshot }: HandArenaPro
       const aggression = app.mood.aggressive + app.mood.challenging * 0.5;
       const pxPerM = ((H * 0.38) / 0.18) * (1 + 0.25 * aggression);
       const sway = Math.sin(wavePhase) * 0.12 * app.wave;
-      const appLm = rotate(handLandmarks({ fingers: app.fingers, roll: app.roll + sway * 2 }), 0.35, 0, 0);
+      const appLm = rotate(handLandmarks({ fingers: app.fingers, roll: app.roll + sway * 2, thumbAbduct: app.thumbAbduct }), 0.35, 0, 0);
       const ox = appPos.x * W + Math.sin(wavePhase) * W * 0.06 * app.wave;
       const oy = appPos.y * H + 0.09 * pxPerM;
       const appPts = appLm.map((p: HandLandmark) => ({ x: ox + p.x * pxPerM, y: oy + p.y * pxPerM }));

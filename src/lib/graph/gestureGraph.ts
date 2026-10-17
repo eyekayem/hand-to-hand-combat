@@ -37,6 +37,8 @@ export interface GraphInput {
 export interface Response {
   fingers: FingerState;
   roll: number;
+  /** Thumb angle when out: 0 beside the index, 1 sideways (thumbs up). Default 0. */
+  thumbAbduct?: number;
   mood: Mood;
   wave?: boolean;
 }
@@ -55,7 +57,7 @@ export interface NodeState { id: string; label: string; score: number; weight: n
 export interface Resolution {
   nodes: NodeState[];
   /** Blended target for the app hand. */
-  target: { fingers: FingerState; roll: number; wave: number; mood: Record<Mood, number> };
+  target: { fingers: FingerState; roll: number; thumbAbduct: number; wave: number; mood: Record<Mood, number> };
   /** Node with the most weight, or null when idle dominates. */
   dominant: string | null;
   dominantWeight: number;
@@ -75,7 +77,7 @@ const all = (...xs: number[]) => Math.min(...xs);
 const F = (thumb: number, index: number, middle: number, ring: number, pinky: number): FingerState =>
   ({ thumb, index, middle, ring, pinky });
 
-export const IDLE: Response = { fingers: F(0.45, 0.55, 0.55, 0.5, 0.45), roll: 0, mood: 'neutral' };
+export const IDLE: Response = { fingers: F(0.55, 0.8, 0.8, 0.75, 0.7), roll: 0, mood: 'neutral' };
 
 // ---------- default graph ----------
 export const DEFAULT_GRAPH: GraphNode[] = [
@@ -93,12 +95,12 @@ export const DEFAULT_GRAPH: GraphNode[] = [
   {
     id: 'thumbsUp', label: 'Thumbs up', parents: ['closing'],
     when: x => thumbOut(x.fingers.thumb) * smoothstep(0.2, 0.6, x.thumbUp),
-    response: { fingers: F(1, 0, 0, 0, 0), roll: Math.PI / 2, mood: 'friendly' },
+    response: { fingers: F(1, 0, 0, 0, 0), roll: Math.PI / 2, thumbAbduct: 1, mood: 'friendly' },
   },
   {
     id: 'thumbsDown', label: 'Thumbs down', parents: ['closing'],
     when: x => thumbOut(x.fingers.thumb) * smoothstep(0.2, 0.6, -x.thumbUp),
-    response: { fingers: F(1, 0, 0, 0, 0), roll: -Math.PI / 2, mood: 'challenging' },
+    response: { fingers: F(1, 0, 0, 0, 0), roll: -Math.PI / 2, thumbAbduct: 1, mood: 'challenging' },
   },
   {
     id: 'point', label: 'Point',
@@ -155,13 +157,14 @@ export function resolve(x: GraphInput, graph: GraphNode[] = DEFAULT_GRAPH, idle:
 
   const fingers = { thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0 };
   const mood = Object.fromEntries(MOODS.map(m => [m, 0])) as Record<Mood, number>;
-  let rollX = 0, rollY = 0, wave = 0;
+  let rollX = 0, rollY = 0, wave = 0, abduct = 0;
   const addResp = (r: Response, w: number) => {
     if (w <= 0) return;
     for (const key of Object.keys(fingers) as (keyof FingerState)[]) fingers[key] += r.fingers[key] * w;
     rollX += Math.cos(r.roll) * w;
     rollY += Math.sin(r.roll) * w;
     mood[r.mood] += w;
+    abduct += (r.thumbAbduct ?? 0) * w;
     if (r.wave) wave += w;
   };
   graph.forEach((n, i) => addResp(n.response, weights[i]));
@@ -174,7 +177,7 @@ export function resolve(x: GraphInput, graph: GraphNode[] = DEFAULT_GRAPH, idle:
 
   return {
     nodes: graph.map((n, i) => ({ id: n.id, label: n.label, score: score.get(n.id)!, weight: weights[i] })),
-    target: { fingers, roll: Math.atan2(rollY, rollX), wave, mood },
+    target: { fingers, roll: Math.atan2(rollY, rollX), thumbAbduct: abduct, wave, mood },
     dominant,
     dominantWeight,
   };
@@ -191,6 +194,7 @@ export const RESPONSE_TAU_MS = 30;
 export interface AppHandState {
   fingers: FingerState;
   roll: number;
+  thumbAbduct: number;
   wave: number;
   mood: Record<Mood, number>;
 }
@@ -200,6 +204,7 @@ export class ResponseFollower {
   state: AppHandState = {
     fingers: { ...IDLE.fingers },
     roll: 0,
+    thumbAbduct: 0,
     wave: 0,
     mood: Object.fromEntries(MOODS.map(m => [m, m === 'neutral' ? 1 : 0])) as Record<Mood, number>,
   };
@@ -214,6 +219,7 @@ export class ResponseFollower {
     let d = target.roll - s.roll;
     d = Math.atan2(Math.sin(d), Math.cos(d));
     s.roll += d * a;
+    s.thumbAbduct += (target.thumbAbduct - s.thumbAbduct) * a;
     s.wave += (target.wave - s.wave) * a;
     for (const m of MOODS) s.mood[m] += (target.mood[m] - s.mood[m]) * a;
     return s;

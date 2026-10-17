@@ -71,15 +71,22 @@ export const THUMB_OUT = thumbAlong(v(1, -0.2, -0.1));
 /** Out but angled up beside the index (relaxed open hand). */
 export const THUMB_OPEN = thumbAlong(v(1, -1, -0.2));
 
-export function thumbFromExtension(ext: number, out: V[] = THUMB_OUT): V[] {
+/**
+ * @param ext 0 tucked across the palm, 1 fully out
+ * @param abduct 0 out beside the index (open hand), 1 out sideways (thumbs up)
+ */
+export function thumbFromExtension(ext: number, abduct = 1): V[] {
   const t = clamp01(ext);
-  return THUMB_TUCKED.map((p, i) => lerp(p, out[i], t));
+  const a = clamp01(abduct);
+  return THUMB_TUCKED.map((p, i) => lerp(p, lerp(THUMB_OPEN[i], THUMB_OUT[i], a), t));
 }
 
 export interface HandPose {
   fingers: FingerState;
   /** Rotation in the image plane, radians, same sign as computeRoll. */
   roll?: number;
+  /** Thumb angle when out: 0 beside the index, 1 sideways. Default 1. */
+  thumbAbduct?: number;
 }
 
 /** Rotate rigidly about the wrist by Euler angles (radians). */
@@ -103,7 +110,7 @@ export function handLandmarks(pose: HandPose): V[] {
   const f = pose.fingers;
   const w = handFromFlex(
     [flexForExtension(f.index), flexForExtension(f.middle), flexForExtension(f.ring), flexForExtension(f.pinky)],
-    thumbFromExtension(f.thumb),
+    thumbFromExtension(f.thumb, pose.thumbAbduct ?? 1),
   );
   // computeRoll is measured in the user's mirrored view, so image-plane
   // rotation is the negative of roll.

@@ -3,7 +3,7 @@
 // restarts the camera. Callbacks are read through refs, so a parent re-render
 // doesn't restart the tracking loop.
 import { useRef, useEffect, useState } from 'react';
-import { initializeHandTracking, detectHands, TrackedHand, TrackingResult } from '@/lib/handTracking';
+import { initializeHandTracking, detectHands, setMaxHands, TrackedHand, TrackingResult } from '@/lib/handTracking';
 import { physicalHandFromLabel } from '@/lib/hand/handGeometry';
 
 export interface TrackingState {
@@ -40,6 +40,12 @@ export function LiveCapture({ isActive, showVideo = true, onTrackingUpdate, onEr
   const [status, setStatus] = useState<'off' | 'starting' | 'live' | 'error'>('off');
   const [fps, setFps] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // Studio shows both hands. Warm the tracker before the camera is switched on.
+  useEffect(() => {
+    setMaxHands(2).catch(() => {});
+    initializeHandTracking().catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!isActive) return;
@@ -79,7 +85,7 @@ export function LiveCapture({ isActive, showVideo = true, onTrackingUpdate, onEr
       try {
         await initializeHandTracking();
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 60 }, facingMode: 'user' },
         });
         if (cancelled) return;
         const video = videoRef.current!;
