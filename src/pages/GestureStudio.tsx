@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { ArrowLeft, Camera, CameraOff } from 'lucide-react';
 import { StudioViewport, type HandState } from '@/components/StudioViewport';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TeachPanel } from '@/components/TeachPanel';
 import { TestPanel } from '@/components/TestPanel';
 import { LibraryPanel } from '@/components/LibraryPanel';
@@ -303,7 +304,12 @@ export default function GestureStudio() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="flex-1">
-          <StudioViewport userHand={userHand} appHandTarget={appHandTarget} />
+          <ErrorBoundary
+            name="StudioViewport"
+            fallback={<div className="h-full flex items-center justify-center text-sm text-muted-foreground">3D view unavailable. Tracking still works.</div>}
+          >
+            <StudioViewport userHand={userHand} appHandTarget={appHandTarget} />
+          </ErrorBoundary>
         </div>
 
         <div className="w-80 border-l bg-card flex flex-col">

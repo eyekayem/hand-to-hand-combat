@@ -1,73 +1,52 @@
-# Welcome to your Lovable project
+# Hand to Hand Combat
 
-## Project info
+A vision app that answers your hand signals: friendly, aggressive, playful and challenging. Webcam hand tracking with MediaPipe, a call-and-response arena, and a Gesture Studio for teaching new gestures.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+Originally prototyped in Lovable (project `5b34141e`), now developed here directly.
 
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Run
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+npm install
+npm run dev      # http://localhost:8080
+npm test         # unit tests (vitest)
+npm run lint
+npm run build
 ```
 
-**Edit a file directly in GitHub**
+Needs a webcam and network access to `cdn.jsdelivr.net` (MediaPipe WASM, drei fonts) and `storage.googleapis.com` (hand model).
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Routes
 
-**Use GitHub Codespaces**
+| Route | What |
+|---|---|
+| `/` | Arena: make a built-in gesture, hold still, the app hand responds |
+| `/studio` | Gesture Studio: Teach, Test, Library for custom gestures |
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## How recognition works
 
-## What technologies are used for this project?
+```
+webcam -> MediaPipe HandLandmarker -> One Euro smoothing (per physical hand)
+       -> hand/handGeometry (world landmarks)
+            fingers: joint-angle curl, thumb = bend + reach
+            orientation: palm normal (handedness-corrected), roll
+            shape vector: landmarks in the hand's own frame
+       -> arena:  features.ts rules (FIST, OPEN, PEACE, POINT, THUMBS_UP, WAVE)
+       -> studio: gestureTypes.ts kNN on shape + orientation score,
+                  GestureSequencer for hold / two-position gestures
+```
 
-This project is built with:
+Key files:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+- `src/lib/hand/handGeometry.ts`: all hand math. One source of truth for both pages.
+- `src/lib/hand/oneEuro.ts`: landmark smoothing.
+- `src/lib/gestureTypes.ts`: templates (format v2), matching, sequencing, validation.
+- `src/lib/features.ts`: built-in arena gestures.
+- `src/lib/behaviorEngine.ts`: call-and-response logic.
+- `src/lib/handTracking.ts`: MediaPipe setup (version pinned to match `package.json`).
 
-## How can I deploy this project?
+Notes:
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- MediaPipe labels handedness assuming a mirrored frame; we feed raw webcam frames, so `physicalHandFromLabel` swaps it.
+- Thumb thresholds in `handGeometry.ts` are first-pass anatomical values. Calibrate with real captures using the Studio's live readout.
+- Gestures saved by the Lovable build (format v1) are dropped on load; re-teach them.

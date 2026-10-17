@@ -2,7 +2,8 @@
 // so tracking updates move them without re-rendering React.
 import { useRef, type MutableRefObject } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Grid, Text } from '@react-three/drei';
+import { OrbitControls, Grid } from '@react-three/drei';
+import { SceneText } from './SceneText';
 import type { Group } from 'three';
 import { Hand3D } from './Hand3D';
 
@@ -61,8 +62,8 @@ export function StudioViewport({ userHand, appHandTarget, showGrid = true }: Stu
         <meshBasicMaterial color="#4a5568" opacity={0.3} transparent />
       </mesh>
 
-      <Text position={[0, -100, 200]} fontSize={16} color="#22d3ee">+Z (User)</Text>
-      <Text position={[0, -100, -200]} fontSize={16} color="#f97316">-Z (App)</Text>
+      <SceneText position={[0, -100, 200]} fontSize={16} color="#22d3ee">+Z (User)</SceneText>
+      <SceneText position={[0, -100, -200]} fontSize={16} color="#f97316">-Z (App)</SceneText>
 
       {showGrid && (
         <Grid

@@ -1,7 +1,8 @@
 // Simple 3D Hand representation for blocking tool
 import { useRef } from 'react';
 import { Group } from 'three';
-import { Text, Billboard } from '@react-three/drei';
+import { Billboard } from '@react-three/drei';
+import { SceneText } from './SceneText';
 
 interface Hand3DProps {
   position: [number, number, number];
@@ -64,7 +65,7 @@ export function Hand3D({ position, rotation = [0, 0, 0], color, label, isSelecte
 
       {/* Label - always faces camera */}
       <Billboard follow lockX={false} lockY={false} lockZ={false}>
-        <Text
+        <SceneText
           position={[0, -60, 0]}
           fontSize={18}
           color="#ffffff"
@@ -74,12 +75,12 @@ export function Hand3D({ position, rotation = [0, 0, 0], color, label, isSelecte
           outlineColor="#000000"
         >
           {label}
-        </Text>
+        </SceneText>
 
         {/* Position data */}
         {showPosition && (
           <group position={[0, -85, 0]}>
-            <Text
+            <SceneText
               position={[0, 0, 0]}
               fontSize={12}
               color="#ff6b6b"
@@ -87,8 +88,8 @@ export function Hand3D({ position, rotation = [0, 0, 0], color, label, isSelecte
               anchorY="top"
             >
               {`X: ${position[0].toFixed(0)}`}
-            </Text>
-            <Text
+            </SceneText>
+            <SceneText
               position={[0, -15, 0]}
               fontSize={12}
               color="#6bff6b"
@@ -96,8 +97,8 @@ export function Hand3D({ position, rotation = [0, 0, 0], color, label, isSelecte
               anchorY="top"
             >
               {`Y: ${position[1].toFixed(0)}`}
-            </Text>
-            <Text
+            </SceneText>
+            <SceneText
               position={[0, -30, 0]}
               fontSize={12}
               color="#6b6bff"
@@ -105,7 +106,7 @@ export function Hand3D({ position, rotation = [0, 0, 0], color, label, isSelecte
               anchorY="top"
             >
               {`Z: ${position[2].toFixed(0)}`}
-            </Text>
+            </SceneText>
           </group>
         )}
       </Billboard>
