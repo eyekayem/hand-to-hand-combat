@@ -8,7 +8,7 @@ Originally prototyped in Lovable (project `5b34141e`), now developed here direct
 
 ```sh
 npm install
-npm run dev      # http://localhost:8080
+npm run dev      # http://localhost:8080/h2h/
 npm test         # unit tests (vitest)
 npm run lint
 npm run build
@@ -16,12 +16,16 @@ npm run build
 
 Needs a webcam and network access to `cdn.jsdelivr.net` (MediaPipe WASM, drei fonts) and `storage.googleapis.com` (hand model).
 
+## Hosting
+
+Public at **bklt.ai/h2h**, no sign-in. This repo deploys as its own Vercel project (team `bkltai`) with base path `/h2h/` (build output in `dist/h2h`). The `bklt-mvp` project proxies `/h2h/*` to it via a rewrite in its `vercel.json`, so pushes here never redeploy bklt.ai.
+
 ## Routes
 
 | Route | What |
 |---|---|
-| `/` | Arena: make a built-in gesture, hold still, the app hand responds |
-| `/studio` | Gesture Studio: Teach, Test, Library for custom gestures |
+| `/h2h/` | Arena: make a built-in gesture, hold still, the app hand responds |
+| `/h2h/studio` | Gesture Studio: Teach, Test, Library for custom gestures |
 
 ## How recognition works
 

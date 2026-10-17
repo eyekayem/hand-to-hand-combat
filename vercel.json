@@ -1,0 +1,16 @@
+{
+  "outputDirectory": "dist",
+  "redirects": [
+    { "source": "/", "destination": "/h2h/", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/h2h", "destination": "/h2h/index.html" },
+    { "source": "/h2h/:path*", "destination": "/h2h/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/h2h/assets/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+    }
+  ]
+}
