@@ -1,23 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { HandArena } from '@/components/HandArena';
 import { TrackedHand } from '@/lib/handTracking';
-import { extractFeatures, FeatureConfig, HandFeatures, resetFeatureHistory } from '@/lib/features';
+import { extractFeatures, HandFeatures, resetFeatureHistory } from '@/lib/features';
+import { pickPrimaryHand } from '@/lib/hand/handGeometry';
 import { updateBehavior, getState, GestureCommand, BehaviorState, resetBehavior } from '@/lib/behaviorEngine';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { NavLink } from '@/components/NavLink';
 
 const Index = () => {
   const [cameraActive, setCameraActive] = useState(false);
   const [fps, setFps] = useState(0);
 
-  const [featureConfig] = useState<FeatureConfig>({
-    opennessThreshold: 0.6,
-    fistThreshold: 0.3,
-    pointThreshold: 0.7,
-    boundaryY: 0.5,
-    boundarySensitivity: 0.1,
-    smoothingWindow: 15
-  });
 
   const [currentFeatures, setCurrentFeatures] = useState<HandFeatures | null>(null);
   const [gesture, setGesture] = useState<GestureCommand | null>(null);
@@ -36,18 +28,14 @@ const Index = () => {
     setFps(trackingFps);
     const timestamp = performance.now();
 
-    let features: HandFeatures | null = null;
-    if (hands.length > 0) {
-      features = extractFeatures(hands[0], featureConfig, timestamp);
-      setCurrentFeatures(features);
-    } else {
-      setCurrentFeatures(null);
-    }
+    const primary = pickPrimaryHand(hands);
+    const features: HandFeatures | null = primary ? extractFeatures(primary, timestamp) : null;
+    setCurrentFeatures(features);
 
     const newGesture = updateBehavior(features, timestamp);
     setGesture(newGesture);
     setBehaviorState(getState());
-  }, [featureConfig]);
+  }, []);
 
   return (
     <div className="h-screen w-screen bg-background overflow-hidden flex flex-col">
@@ -63,9 +51,6 @@ const Index = () => {
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
             <NavLink to="/studio" className="hover:text-foreground text-primary font-medium">
               Gesture Studio →
-            </NavLink>
-            <NavLink to="/blocking" className="hover:text-foreground">
-              3D Blocking →
             </NavLink>
             <span>{fps} FPS</span>
             {behaviorState.isResponding && (

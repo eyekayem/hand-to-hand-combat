@@ -1,7 +1,9 @@
-// Hand Tracking Module using MediaPipe Tasks Vision
-// Handles webcam access and hand landmark detection
+// Hand Tracking Module using MediaPipe Tasks Vision.
+// Owns the single HandLandmarker and applies One Euro smoothing per physical hand.
 
 import { FilesetResolver, HandLandmarker, HandLandmarkerResult } from '@mediapipe/tasks-vision';
+import { LandmarkSmoother } from './hand/oneEuro';
+import { physicalHandFromLabel, type PhysicalHand } from './hand/handGeometry';
 
 export interface HandLandmark {
   x: number;
@@ -12,6 +14,7 @@ export interface HandLandmark {
 export interface TrackedHand {
   landmarks: HandLandmark[];
   worldLandmarks: HandLandmark[];
+  /** MediaPipe's label, which assumes a mirrored (selfie) frame. Use physicalHandFromLabel. */
   handedness: 'Left' | 'Right';
   confidence: number;
 }
@@ -22,35 +25,71 @@ export interface TrackingResult {
   fps: number;
 }
 
+// Must match the installed @mediapipe/tasks-vision version (pinned in package.json).
+const MEDIAPIPE_VERSION = '0.10.35';
+const WASM_ROOT = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+
 let handLandmarker: HandLandmarker | null = null;
+let initPromise: Promise<void> | null = null;
 let lastFrameTime = 0;
 let frameCount = 0;
 let currentFps = 0;
+let lastVideoTime = -1;
+let lastResult: TrackingResult = { hands: [], timestamp: 0, fps: 0 };
 
-export async function initializeHandTracking(): Promise<void> {
-  const vision = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-  );
+// Smoothing state per physical hand, in both coordinate spaces.
+const SMOOTH_RESET_MS = 300;
+const smoothers = new Map<PhysicalHand, { image: LandmarkSmoother; world: LandmarkSmoother; lastSeen: number }>();
+let smoothingEnabled = true;
 
-  handLandmarker = await HandLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
-      delegate: 'GPU'
-    },
-    runningMode: 'VIDEO',
-    numHands: 2,
-    minHandDetectionConfidence: 0.5,
-    minHandPresenceConfidence: 0.5,
-    minTrackingConfidence: 0.5
-  });
+export function setSmoothing(enabled: boolean) {
+  smoothingEnabled = enabled;
+  smoothers.clear();
 }
 
-export function detectHands(video: HTMLVideoElement, timestamp: number): TrackingResult {
-  if (!handLandmarker) {
-    return { hands: [], timestamp, fps: 0 };
+/** Safe to call repeatedly or concurrently; loads once. */
+export function initializeHandTracking(): Promise<void> {
+  if (handLandmarker) return Promise.resolve();
+  if (!initPromise) {
+    initPromise = (async () => {
+      const vision = await FilesetResolver.forVisionTasks(WASM_ROOT);
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
+        runningMode: 'VIDEO',
+        numHands: 2,
+        minHandDetectionConfidence: 0.5,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+    })().catch(err => {
+      initPromise = null;
+      throw err;
+    });
   }
+  return initPromise;
+}
 
-  // Calculate FPS
+function smooth(hand: TrackedHand, t: number): TrackedHand {
+  const key = physicalHandFromLabel(hand.handedness);
+  let s = smoothers.get(key);
+  if (!s || t - s.lastSeen > SMOOTH_RESET_MS) {
+    s = { image: new LandmarkSmoother(), world: new LandmarkSmoother(), lastSeen: t };
+    smoothers.set(key, s);
+  }
+  s.lastSeen = t;
+  return { ...hand, landmarks: s.image.smooth(hand.landmarks, t), worldLandmarks: s.world.smooth(hand.worldLandmarks, t) };
+}
+
+/**
+ * Runs detection on the current video frame. Repeated calls for the same
+ * video frame return the previous result instead of re-running the model.
+ */
+export function detectHands(video: HTMLVideoElement, timestamp: number): TrackingResult {
+  if (!handLandmarker) return { hands: [], timestamp, fps: 0 };
+  if (video.currentTime === lastVideoTime) return lastResult;
+  lastVideoTime = video.currentTime;
+
   frameCount++;
   if (timestamp - lastFrameTime >= 1000) {
     currentFps = frameCount;
@@ -59,32 +98,30 @@ export function detectHands(video: HTMLVideoElement, timestamp: number): Trackin
   }
 
   const result: HandLandmarkerResult = handLandmarker.detectForVideo(video, timestamp);
-
   const hands: TrackedHand[] = [];
 
-  if (result.landmarks && result.landmarks.length > 0) {
-    for (let i = 0; i < result.landmarks.length; i++) {
-      const landmarks = result.landmarks[i];
-      const worldLandmarks = result.worldLandmarks?.[i] || landmarks;
-      const handedness = result.handednesses?.[i]?.[0];
-
-      hands.push({
-        landmarks: landmarks.map(l => ({ x: l.x, y: l.y, z: l.z })),
-        worldLandmarks: worldLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z })),
-        handedness: (handedness?.categoryName as 'Left' | 'Right') || 'Right',
-        confidence: handedness?.score || 0.5
-      });
-    }
+  for (let i = 0; i < (result.landmarks?.length ?? 0); i++) {
+    const landmarks = result.landmarks[i];
+    const worldLandmarks = result.worldLandmarks?.[i] || landmarks;
+    const handedness = result.handedness?.[i]?.[0] ?? result.handednesses?.[i]?.[0];
+    const raw: TrackedHand = {
+      landmarks: landmarks.map(l => ({ x: l.x, y: l.y, z: l.z })),
+      worldLandmarks: worldLandmarks.map(l => ({ x: l.x, y: l.y, z: l.z })),
+      handedness: (handedness?.categoryName as 'Left' | 'Right') || 'Right',
+      confidence: handedness?.score ?? 0.5,
+    };
+    hands.push(smoothingEnabled ? smooth(raw, timestamp) : raw);
   }
 
-  return { hands, timestamp, fps: currentFps };
+  lastResult = { hands, timestamp, fps: currentFps };
+  return lastResult;
 }
 
 export function isTrackingReady(): boolean {
   return handLandmarker !== null;
 }
 
-// Landmark indices for reference
+// Landmark indices for reference (also exported as L from hand/handGeometry).
 export const LANDMARK_INDICES = {
   WRIST: 0,
   THUMB_CMC: 1,
@@ -106,5 +143,5 @@ export const LANDMARK_INDICES = {
   PINKY_MCP: 17,
   PINKY_PIP: 18,
   PINKY_DIP: 19,
-  PINKY_TIP: 20
+  PINKY_TIP: 20,
 };

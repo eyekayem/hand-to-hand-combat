@@ -85,7 +85,7 @@ export function updateBehavior(
 
     if (elapsed < duration) {
       // Continue response
-      let position = { ...state.position };
+      const position = { ...state.position };
 
       // Wave animation - oscillate
       if (state.currentResponse === 'WAVE') {

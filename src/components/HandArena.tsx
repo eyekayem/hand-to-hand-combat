@@ -1,5 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
-import { initializeHandTracking, detectHands, isTrackingReady, TrackedHand, LANDMARK_INDICES, HandLandmark } from '@/lib/handTracking';
+import { initializeHandTracking, detectHands, isTrackingReady, TrackedHand, TrackingResult, LANDMARK_INDICES, HandLandmark } from '@/lib/handTracking';
+import { pickPrimaryHand } from '@/lib/hand/handGeometry';
 import { GestureCommand, Mood } from '@/lib/behaviorEngine';
 
 interface HandArenaProps {
@@ -40,7 +41,6 @@ const GESTURE_POSES: Record<string, HandLandmark[]> = {
 export function HandArena({ onHandUpdate, gesture, isActive, onActiveChange, detectedGesture }: HandArenaProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const animationRef = useRef<number>();
   const streamRef = useRef<MediaStream | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +83,6 @@ export function HandArena({ onHandUpdate, gesture, isActive, onActiveChange, det
   }, [onActiveChange]);
 
   const stopCamera = useCallback(() => {
-    if (animationRef.current) cancelAnimationFrame(animationRef.current);
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
@@ -94,6 +93,15 @@ export function HandArena({ onHandUpdate, gesture, isActive, onActiveChange, det
     }
     onActiveChange(false);
   }, [onActiveChange]);
+
+  // The render loop runs once for the component's lifetime and reads live
+  // values through refs, so per-frame prop changes don't tear it down.
+  const gestureRef = useRef(gesture);
+  const onHandUpdateRef = useRef(onHandUpdate);
+  const isActiveRef = useRef(isActive);
+  gestureRef.current = gesture;
+  onHandUpdateRef.current = onHandUpdate;
+  isActiveRef.current = isActive;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -109,43 +117,51 @@ export function HandArena({ onHandUpdate, gesture, isActive, onActiveChange, det
       }
     };
     resize();
-    window.addEventListener('resize', resize);
+    const observer = new ResizeObserver(resize);
+    if (canvas.parentElement) observer.observe(canvas.parentElement);
+
+    let lastResult: TrackingResult | null = null;
+    let raf = 0;
 
     const render = (timestamp: number) => {
       const { width, height } = canvas;
+      const currentGesture = gestureRef.current;
 
-      // Clear with dark background
       ctx.fillStyle = '#0a0c10';
       ctx.fillRect(0, 0, width, height);
 
-      // Track hands
-      if (isActive && videoRef.current && videoRef.current.readyState >= 2) {
-        const result = detectHands(videoRef.current, timestamp);
-        onHandUpdate(result.hands, result.fps);
-        userHandRef.current = result.hands[0] || null;
+      const video = videoRef.current;
+      if (isActiveRef.current && video && video.readyState >= 2) {
+        const result = detectHands(video, timestamp);
+        // detectHands returns the same object until a new video frame arrives.
+        if (result !== lastResult) {
+          lastResult = result;
+          onHandUpdateRef.current(result.hands, result.fps);
+          userHandRef.current = pickPrimaryHand(result.hands);
+        }
+      } else if (!isActiveRef.current) {
+        userHandRef.current = null;
       }
 
-      // Update app hand state (smooth follow + mirroring)
-      updateAppHand(userHandRef.current, gesture);
+      updateAppHand(userHandRef.current, currentGesture);
+      drawAppHand(ctx, width, height, appHandRef.current, currentGesture);
+      if (userHandRef.current) drawUserHand(ctx, userHandRef.current, width, height);
 
-      // Draw app hand first (behind user hand when close)
-      drawAppHand(ctx, width, height, appHandRef.current, gesture);
-
-      // Draw user's hand on top
-      if (userHandRef.current) {
-        drawUserHand(ctx, userHandRef.current, width, height);
-      }
-
-      animationRef.current = requestAnimationFrame(render);
+      raf = requestAnimationFrame(render);
     };
 
-    animationRef.current = requestAnimationFrame(render);
+    raf = requestAnimationFrame(render);
 
     return () => {
-      window.removeEventListener('resize', resize);
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      observer.disconnect();
+      cancelAnimationFrame(raf);
     };
-  }, [isActive, gesture, onHandUpdate]);
+  }, []);
+
+  // Release the camera if the arena unmounts while live.
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach(track => track.stop());
+  }, []);
 
   const updateAppHand = (userHand: TrackedHand | null, gesture: GestureCommand | null) => {
     const app = appHandRef.current;

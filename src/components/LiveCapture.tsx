@@ -1,255 +1,159 @@
-// Live Capture Component - Webcam hand tracking
-import { useRef, useEffect, useState, useCallback } from 'react';
-import { initializeHandTracking, detectHands, isTrackingReady, TrackedHand } from '@/lib/handTracking';
-import { Button } from '@/components/ui/button';
+// Live Capture: webcam + hand tracking for Gesture Studio.
+// The <video> element is always mounted, so toggling the preview never
+// restarts the camera. Callbacks are read through refs, so a parent re-render
+// doesn't restart the tracking loop.
+import { useRef, useEffect, useState } from 'react';
+import { initializeHandTracking, detectHands, TrackedHand, TrackingResult } from '@/lib/handTracking';
+import { physicalHandFromLabel } from '@/lib/hand/handGeometry';
 
-// Export tracking state for consumers
 export interface TrackingState {
+  /** The user's physical left hand. */
   leftHand: TrackedHand | null;
+  /** The user's physical right hand. */
   rightHand: TrackedHand | null;
   fps: number;
+  t: number;
 }
 
 interface LiveCaptureProps {
   isActive: boolean;
   showVideo?: boolean;
-  // New unified callback
   onTrackingUpdate?: (state: TrackingState) => void;
-  // Legacy callbacks for BlockingTool
-  onHandsUpdate?: (leftHand: TrackedHand | null, rightHand: TrackedHand | null) => void;
-  onActiveChange?: (active: boolean) => void;
+  onError?: (message: string) => void;
 }
 
-export function LiveCapture({
-  isActive,
-  showVideo = true,
-  onTrackingUpdate,
-  onHandsUpdate,
-  onActiveChange,
-}: LiveCaptureProps) {
+const CONNECTIONS: [number, number][] = [
+  [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [0, 17], [17, 18], [18, 19], [19, 20],
+];
+
+export function LiveCapture({ isActive, showVideo = true, onTrackingUpdate, onError }: LiveCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const animationRef = useRef<number>(0);
+  const onUpdateRef = useRef(onTrackingUpdate);
+  const onErrorRef = useRef(onError);
+  const showVideoRef = useRef(showVideo);
+  onUpdateRef.current = onTrackingUpdate;
+  onErrorRef.current = onError;
+  showVideoRef.current = showVideo;
 
-  const [isInitializing, setIsInitializing] = useState(false);
+  const [status, setStatus] = useState<'off' | 'starting' | 'live' | 'error'>('off');
   const [fps, setFps] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [internalActive, setInternalActive] = useState(false);
 
-  const startCapture = useCallback(async () => {
-    setIsInitializing(true);
-    setError(null);
-
-    try {
-      // Initialize MediaPipe if needed
-      if (!isTrackingReady()) {
-        await initializeHandTracking();
-      }
-
-      // Get webcam stream
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-          facingMode: 'user'
-        }
-      });
-
-      streamRef.current = stream;
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-
-      setInternalActive(true);
-      onActiveChange?.(true);
-    } catch (err) {
-      console.error('Failed to start capture:', err);
-      setError(err instanceof Error ? err.message : 'Failed to start camera');
-    } finally {
-      setIsInitializing(false);
-    }
-  }, [onActiveChange]);
-
-  const stopCapture = useCallback(() => {
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-
-    setInternalActive(false);
-    onActiveChange?.(false);
-    onHandsUpdate?.(null, null);
-    onTrackingUpdate?.({ leftHand: null, rightHand: null, fps: 0 });
-  }, [onActiveChange, onHandsUpdate, onTrackingUpdate]);
-
-  // Auto-start when isActive changes externally
   useEffect(() => {
-    if (isActive && !internalActive && !isInitializing) {
-      startCapture();
-    } else if (!isActive && internalActive) {
-      stopCapture();
-    }
-  }, [isActive, internalActive, isInitializing, startCapture, stopCapture]);
+    if (!isActive) return;
+    let cancelled = false;
+    let stream: MediaStream | null = null;
+    let raf = 0;
+    let lastResult: TrackingResult | null = null;
+    let lastFpsShown = -1;
+    const videoEl = videoRef.current;
 
-  // Tracking loop
-  useEffect(() => {
-    if (!internalActive || !videoRef.current) return;
-
-    const video = videoRef.current;
-
-    const trackFrame = () => {
-      if (!internalActive || video.readyState !== 4) {
-        animationRef.current = requestAnimationFrame(trackFrame);
-        return;
-      }
-
-      const result = detectHands(video, performance.now());
-      setFps(result.fps);
-
-      // Separate left and right hands
-      let leftHand: TrackedHand | null = null;
-      let rightHand: TrackedHand | null = null;
-
-      for (const hand of result.hands) {
-        // MediaPipe reports handedness from camera's perspective (mirrored)
-        // So 'Right' from camera = user's left hand
-        if (hand.handedness === 'Right') {
-          leftHand = hand;
-        } else {
-          rightHand = hand;
-        }
-      }
-
-      // Call both callbacks for compatibility
-      onHandsUpdate?.(leftHand, rightHand);
-      onTrackingUpdate?.({ leftHand, rightHand, fps: result.fps });
-
-      // Draw debug preview if showVideo is true
-      if (showVideo && canvasRef.current) {
-        const ctx = canvasRef.current.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-
-          // Draw video (mirrored)
-          ctx.save();
-          ctx.scale(-1, 1);
-          ctx.drawImage(video, -canvasRef.current.width, 0, canvasRef.current.width, canvasRef.current.height);
-          ctx.restore();
-
-          // Draw landmarks
+    const loop = (now: number) => {
+      const video = videoRef.current;
+      if (video && video.readyState >= 2) {
+        const result = detectHands(video, now);
+        if (result !== lastResult) {
+          lastResult = result;
+          let leftHand: TrackedHand | null = null;
+          let rightHand: TrackedHand | null = null;
           for (const hand of result.hands) {
-            const color = hand.handedness === 'Right' ? '#22d3ee' : '#14b8a6';
-            ctx.fillStyle = color;
-
-            for (const landmark of hand.landmarks) {
-              const x = canvasRef.current.width - (landmark.x * canvasRef.current.width);
-              const y = landmark.y * canvasRef.current.height;
-              ctx.beginPath();
-              ctx.arc(x, y, 3, 0, Math.PI * 2);
-              ctx.fill();
-            }
+            if (physicalHandFromLabel(hand.handedness) === 'left') leftHand = hand;
+            else rightHand = hand;
           }
+          onUpdateRef.current?.({ leftHand, rightHand, fps: result.fps, t: now });
+          if (result.fps !== lastFpsShown) {
+            lastFpsShown = result.fps;
+            setFps(result.fps);
+          }
+          if (showVideoRef.current) drawPreview(canvasRef.current, video, result);
         }
       }
-
-      animationRef.current = requestAnimationFrame(trackFrame);
+      raf = requestAnimationFrame(loop);
     };
 
-    animationRef.current = requestAnimationFrame(trackFrame);
+    (async () => {
+      setStatus('starting');
+      setError(null);
+      try {
+        await initializeHandTracking();
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        });
+        if (cancelled) return;
+        const video = videoRef.current!;
+        video.srcObject = stream;
+        await video.play();
+        if (cancelled) return;
+        setStatus('live');
+        raf = requestAnimationFrame(loop);
+      } catch (err) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : 'Failed to start camera';
+        setError(msg);
+        setStatus('error');
+        onErrorRef.current?.(msg);
+      }
+    })();
 
     return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      stream?.getTracks().forEach(t => t.stop());
+      if (videoEl) videoEl.srcObject = null;
+      onUpdateRef.current?.({ leftHand: null, rightHand: null, fps: 0, t: performance.now() });
+      setStatus('off');
+      setFps(0);
     };
-  }, [internalActive, onHandsUpdate, onTrackingUpdate, showVideo]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, []);
-
-  // Minimal mode - no UI, just tracking
-  if (!showVideo) {
-    return (
-      <video
-        ref={videoRef}
-        className="hidden"
-        playsInline
-        muted
-      />
-    );
-  }
+  }, [isActive]);
 
   return (
-    <div className="space-y-3">
+    <div className={showVideo ? 'space-y-2' : 'hidden'}>
       <div className="flex items-center justify-between">
         <h4 className="text-xs font-medium text-muted-foreground">Live Capture</h4>
-        <span className="text-xs text-muted-foreground">{fps} FPS</span>
+        <span className="text-xs text-muted-foreground">{status === 'live' ? `${fps} FPS` : status}</span>
       </div>
-
-      {/* Video preview */}
       <div className="relative aspect-[4/3] bg-muted rounded overflow-hidden">
-        <video
-          ref={videoRef}
-          className="absolute inset-0 w-full h-full object-cover opacity-0"
-          playsInline
-          muted
-        />
-        <canvas
-          ref={canvasRef}
-          width={160}
-          height={120}
-          className="w-full h-full"
-        />
-
-        {!internalActive && (
+        <video ref={videoRef} className="absolute inset-0 w-full h-full opacity-0" playsInline muted />
+        <canvas ref={canvasRef} width={320} height={240} className="relative w-full h-full" />
+        {status !== 'live' && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/80">
-            <span className="text-xs text-muted-foreground">Camera off</span>
+            <span className="text-xs text-muted-foreground">
+              {status === 'starting' ? 'Starting camera…' : status === 'error' ? 'Camera error' : 'Camera off'}
+            </span>
           </div>
         )}
       </div>
-
-      {error && (
-        <p className="text-xs text-destructive">{error}</p>
-      )}
-
-      {onActiveChange && (
-        <Button
-          variant={internalActive ? "destructive" : "default"}
-          size="sm"
-          className="w-full"
-          onClick={internalActive ? stopCapture : startCapture}
-          disabled={isInitializing}
-        >
-          {isInitializing ? 'Starting...' : internalActive ? 'Stop Capture' : 'Start Capture'}
-        </Button>
-      )}
-
-      {internalActive && onActiveChange && (
-        <div className="text-xs text-muted-foreground">
-          <p>• Move hands to control user hands</p>
-          <p>• Depth (Z) from hand distance to camera</p>
-        </div>
-      )}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
+}
+
+function drawPreview(canvas: HTMLCanvasElement | null, video: HTMLVideoElement, result: TrackingResult) {
+  const ctx = canvas?.getContext('2d');
+  if (!canvas || !ctx) return;
+  const { width: w, height: h } = canvas;
+  ctx.save();
+  ctx.scale(-1, 1); // mirror for a selfie view
+  ctx.drawImage(video, -w, 0, w, h);
+  ctx.restore();
+  for (const hand of result.hands) {
+    const color = physicalHandFromLabel(hand.handedness) === 'right' ? '#22d3ee' : '#f97316';
+    const px = (x: number) => w - x * w;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 1.5;
+    for (const [a, b] of CONNECTIONS) {
+      ctx.beginPath();
+      ctx.moveTo(px(hand.landmarks[a].x), hand.landmarks[a].y * h);
+      ctx.lineTo(px(hand.landmarks[b].x), hand.landmarks[b].y * h);
+      ctx.stroke();
+    }
+    for (const p of hand.landmarks) {
+      ctx.beginPath();
+      ctx.arc(px(p.x), p.y * h, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 }

@@ -17,6 +17,8 @@ interface TeachPanelProps {
   currentFingers: FingerState | null;
   currentOrientation: HandOrientation | null;
   isCapturing: boolean;
+  /** Position currently being recorded, if any. */
+  recording?: 1 | 2 | null;
 }
 
 function FingerDisplay({ fingers, label }: { fingers: FingerState | null; label: string }) {
@@ -74,6 +76,7 @@ export function TeachPanel({
   currentFingers,
   currentOrientation,
   isCapturing,
+  recording = null,
 }: TeachPanelProps) {
   const canSave = gestureName.trim() && position1 && position2;
 
@@ -120,10 +123,10 @@ export function TeachPanel({
           size="sm"
           variant={position1 ? "outline" : "default"}
           onClick={() => onCapturePosition(1)}
-          disabled={!isCapturing}
+          disabled={!isCapturing || recording !== null}
           className="w-full"
         >
-          {position1 ? 'Recapture' : 'Capture'} Position 1
+          {recording === 1 ? 'Hold still…' : position1 ? 'Recapture' : 'Capture'} Position 1
         </Button>
       </div>
 
@@ -144,10 +147,10 @@ export function TeachPanel({
           size="sm"
           variant={position2 ? "outline" : "default"}
           onClick={() => onCapturePosition(2)}
-          disabled={!isCapturing}
+          disabled={!isCapturing || recording !== null}
           className="w-full"
         >
-          {position2 ? 'Recapture' : 'Capture'} Position 2
+          {recording === 2 ? 'Hold still…' : position2 ? 'Recapture' : 'Capture'} Position 2
         </Button>
       </div>
 
@@ -174,6 +177,8 @@ export function TeachPanel({
         <div><kbd className="px-1 bg-muted rounded">1</kbd> Capture Position 1</div>
         <div><kbd className="px-1 bg-muted rounded">2</kbd> Capture Position 2</div>
         <div><kbd className="px-1 bg-muted rounded">S</kbd> Save gesture</div>
+        <div><kbd className="px-1 bg-muted rounded">Space</kbd> Camera on/off · <kbd className="px-1 bg-muted rounded">M</kbd> Next tab</div>
+        <div>Each capture records ~0.6s. Hold the pose steady.</div>
       </div>
     </div>
   );
